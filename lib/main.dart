@@ -1,125 +1,170 @@
-import 'package:flutter/material.dart';
+import 'dart:async';
+import 'dart:developer';
 
-void main() {
-  runApp(const MyApp());
+import 'package:agora_rtc_engine/agora_rtc_engine.dart';
+import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
+
+void main() => runApp(const MyApp()); // Fixed: Added const
+
+// Fill in the app ID of your project, generated from Agora Console
+const appId = "1c4ac0a3f8d94e619e664c5c7d9510dd";
+// Fill in the temporary token generated from Agora Console
+const token =
+    "007eJxTYDDcfjFt+T0eIR5edqMtISdLJn5/t2Puar+0W5dm5HGsObhFgcEw2SQx2SDROM0ixdIk1czQMtXMzCTZNNk8xdLU0CAlZZ51a1pDICNDnocRKyMDBIL4LAwpqbn5DAwAbQkflw==";
+// Fill in the channel name you used to generate the token
+const channel = "demo";
+
+// Application class
+class MyApp extends StatefulWidget {
+  const MyApp({super.key}); // Fixed: Converted 'key' to a super parameter
+
+  @override
+  State<MyApp> createState() => MyAppState(); // Fixed: Made _MyAppState public
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class MyAppState extends State<MyApp> {
+  // Fixed: Made _MyAppState public
+  int? _remoteUid;
+  bool _localUserJoined = false;
+  late RtcEngine _engine;
+  ClientRoleType _userRole =
+      ClientRoleType.clientRoleBroadcaster; // Default role
+  int _connectedUsers = 0; // Variable to track the number of connected users
 
-  // This widget is the root of your application.
+  @override
+  void initState() {
+    super.initState();
+    // initAgora(); // Moved initialization to after role selection
+  }
+
+  Future<void> initAgora(ClientRoleType role) async {
+    await [Permission.microphone, Permission.camera].request();
+
+    _engine = createAgoraRtcEngine();
+    await _engine.initialize(const RtcEngineContext(
+        appId: appId,
+        channelProfile: ChannelProfileType
+            .channelProfileCommunication)); // Fixed: Removed const
+
+    _engine.registerEventHandler(RtcEngineEventHandler(
+      onJoinChannelSuccess: (RtcConnection connection, int elapsed) {
+        log('local user ${connection.localUid} joined');
+        setState(() => _localUserJoined = true);
+      },
+      onUserJoined: (RtcConnection connection, int remoteUid, int elapsed) {
+        log("remote user $remoteUid joined");
+        setState(() {
+          _remoteUid = remoteUid;
+          _connectedUsers++; // Increment the count of connected users
+        });
+      },
+      onUserOffline: (RtcConnection connection, int remoteUid,
+          UserOfflineReasonType reason) {
+        log("remote user $remoteUid left channel");
+        setState(() {
+          _remoteUid = null;
+          _connectedUsers--; // Decrement the count of connected users
+        });
+      },
+    ));
+
+    await _engine.enableVideo();
+    if (role == ClientRoleType.clientRoleBroadcaster) {
+      await _engine.startPreview();
+    }
+
+    await _engine.joinChannel(
+        token: token,
+        channelId: channel,
+        options: ChannelMediaOptions(
+            clientRoleType: role,
+            audienceLatencyLevel:
+                AudienceLatencyLevelType.audienceLatencyLevelUltraLowLatency),
+        uid: 0);
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-        useMaterial3: true,
+      home: Scaffold(
+        appBar: AppBar(title: const Text('Connectify Video Call')),
+        body: _localUserJoined ? _callInterface() : _roleSelectionInterface(),
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
     );
   }
-}
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
-
-  @override
-  State<MyHomePage> createState() => _MyHomePageState();
-}
-
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
-
-  void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
-    });
+  Widget _roleSelectionInterface() {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ElevatedButton(
+            onPressed: () => setState(() {
+              _userRole = ClientRoleType.clientRoleBroadcaster;
+              initAgora(_userRole);
+            }),
+            child: const Text('Join as Host'),
+          ),
+          ElevatedButton(
+            onPressed: () => setState(() {
+              _userRole = ClientRoleType.clientRoleAudience;
+              initAgora(_userRole);
+            }),
+            child: const Text('Join as Audience'),
+          ),
+        ],
+      ),
+    );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
-    return Scaffold(
-      appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
-      ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            const Text(
-              'You have pushed the button this many times:',
+  Widget _callInterface() {
+    return Stack(
+      children: [
+        Center(child: _remoteVideo()),
+        if (_userRole == ClientRoleType.clientRoleBroadcaster) ...[
+          Padding(
+            padding: const EdgeInsets.all(10.0),
+            child: Align(
+              alignment: Alignment.bottomRight,
+              child: SizedBox(
+                width: 150,
+                height: 200,
+                child: Center(
+                  child: _localUserJoined
+                      ? AgoraVideoView(
+                          controller: VideoViewController(
+                              rtcEngine: _engine,
+                              canvas: const VideoCanvas(
+                                  uid: 0))) // Fixed: Added const
+                      : const CircularProgressIndicator(),
+                ),
+              ),
             ),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
+          ),
+          Align(
+            alignment: Alignment.topRight,
+            child: Padding(
+              padding: const EdgeInsets.all(10),
+              child: Text('Connected Users: $_connectedUsers'),
             ),
-          ],
-        ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
-      ), // This trailing comma makes auto-formatting nicer for build methods.
+          ),
+        ]
+      ],
     );
+  }
+
+  Widget _remoteVideo() {
+    if (_remoteUid != null) {
+      return AgoraVideoView(
+          controller: VideoViewController.remote(
+              rtcEngine: _engine,
+              canvas: VideoCanvas(uid: _remoteUid),
+              connection: const RtcConnection(
+                  channelId: channel))); // Fixed: Added const
+    } else {
+      return const Text('Please wait for the host to join the call',
+          textAlign: TextAlign.center);
+    }
   }
 }
